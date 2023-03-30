@@ -1,7 +1,9 @@
 #include <SDL.h>
 #include <SDL_image.h>
+#include <SDL_ttf.h>
 #include <stdio.h>
 #include <string>
+#include <cmath>
 
 // Screen dimension constants
 const int SCREEN_WIDTH = 640;
@@ -28,6 +30,9 @@ public:
 	// Loads image at specified path
 	bool loadFromFile(std::string path);
 
+	// Creates image from font string
+	bool loadFromRenderedText(std::string textureText, SDL_Color textColor);
+
 	// Deallocates texture
 	void free();
 
@@ -41,7 +46,7 @@ public:
 	void setAlpha(Uint8 alpha);
 
 	// Renders texture at given point 
-	void render(int x, int y, SDL_Rect* clip = NULL, double angle = 0.0 , SDL_Point* center = NULL, SDL_RendererFlip flip = SDL_FLIP_NONE);
+	void render(int x, int y, SDL_Rect* clip = NULL, double angle = 0.0, SDL_Point* center = NULL, SDL_RendererFlip flip = SDL_FLIP_NONE);
 
 	// Get width and height from texture
 	int getWidth();
@@ -62,9 +67,11 @@ SDL_Window* gWindow = NULL;
 // The surface contained by the window
 SDL_Renderer* gRenderer = NULL;
 
-// Arrow texture
-LTexture gArrowTexture;
+// Globally used font
+TTF_Font* gFont = NULL;
 
+// Rendered Texture
+LTexture gTextTexture;
 
 LTexture::LTexture() {
 	// Initialize
@@ -118,6 +125,33 @@ bool LTexture::loadFromFile(std::string path) {
 	return mTexture != NULL;
 }
 
+bool LTexture::loadFromRenderedText(std::string textureText, SDL_Color textColor) {
+	// Get rid of preexisting texture
+	free();
+
+	// Render text surface
+	SDL_Surface* textSurface = TTF_RenderText_Solid(gFont, textureText.c_str(), textColor);
+	if (textSurface == NULL) {
+		printf("Unable to render text surface! SDL_ttf Error: %s\n", TTF_GetError());
+	}
+	else {
+		// Create texture from surface pixels
+		mTexture = SDL_CreateTextureFromSurface(gRenderer, textSurface);
+		if (mTexture == NULL) {
+			printf("Unable to create texture from rendered text! SDL Error: %s\n", SDL_GetError());
+		}
+		else {
+			// Get image dimensions
+			mWidth = textSurface->w;
+			mHeight = textSurface->h;
+		}
+		// Get rid of old surface
+		SDL_FreeSurface(textSurface);
+	}
+	// Return success
+	return mTexture != NULL;
+}
+
 void LTexture::free() {
 	// Free texture if exists
 	if (mTexture != NULL) {
@@ -143,10 +177,10 @@ void LTexture::setAlpha(Uint8 alpha) {
 	// Modulate texture alpha
 	SDL_SetTextureAlphaMod(mTexture, alpha);
 }
-void LTexture::render(int x, int y, SDL_Rect* clip, double angle , SDL_Point* center, SDL_RendererFlip flip) {
+void LTexture::render(int x, int y, SDL_Rect* clip, double angle, SDL_Point* center, SDL_RendererFlip flip) {
 
 	// Set Rendering space and render to screen
-	SDL_Rect renderQuad = { x, y , mWidth, mHeight };   
+	SDL_Rect renderQuad = { x, y , mWidth, mHeight };
 
 	// Set clip rendering dimensions
 	if (clip != NULL) {
@@ -183,7 +217,7 @@ bool init() {
 		}
 		else {
 			// Create renderer for window
-			gRenderer = SDL_CreateRenderer(gWindow, -1, SDL_RENDERER_ACCELERATED| SDL_RENDERER_PRESENTVSYNC);
+			gRenderer = SDL_CreateRenderer(gWindow, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
 			if (gRenderer == NULL) {
 				printf("Renderer could not be created! SDL Error: %s\n", SDL_GetError());
 				success = false;
@@ -198,7 +232,12 @@ bool init() {
 					printf("SDL_Image could not initialize! SDL_Image Error: %s\n", IMG_GetError());
 					success = false;
 				}
-
+				
+				// Initialize SDL_ttf
+				if (TTF_Init() == -1) {
+					printf("SDL_ttf could not initialize! SDL_ttf Error: %s\n", TTF_GetError());
+					success = false;
+				}
 			}
 		}
 	}
@@ -210,18 +249,31 @@ bool loadMedia() {
 	// Loading succes flag
 	bool success = true;
 
-	// Load sprite sheet texture
-    if (!gArrowTexture.loadFromFile("15_rotation_and_flipping/arrow.png")){
-        printf("Failed to load walking texture animation!\n");
-        success = false;
-    }
+	// Open the font
+	gFont = TTF_OpenFont("16_true_type_fonts/lazy.ttf", 28);
+	if (gFont == NULL) {
+		printf("Failed to load lazy font! SDL_ttf Error: %s\n", TTF_GetError());
+		success = false;
+	}
+	else {
+		// Render text
+		SDL_Color textColor = { 0, 0, 0 };
+		if (gTextTexture.loadFromRenderedText("The quick brown fox jumps over the lazy dog", textColor)) {
+			printf("Failed to render text texture!\n");
+			success = false;
+		}
+	}
 
 	return success;
 }
 
 void close() {
 	// Free loaded images
-	gArrowTexture.free();
+	gTextTexture.free();
+
+	// Free global font
+	TTF_CloseFont(gFont);
+	gFont = NULL;
 
 	// Destroy window
 	SDL_DestroyRenderer(gRenderer);
@@ -232,6 +284,7 @@ void close() {
 	// Quit SDL subsystems
 	SDL_Quit();
 	IMG_Quit();
+	TTF_Quit();
 }
 
 SDL_Texture* loadTexture(std::string path) {
@@ -267,10 +320,10 @@ int main(int argc, char* args[]) {
 			SDL_Event e;
 
 			// Angle of rotation
-            double degrees = 0;
+			double degrees = 0;
 
-            // Flip type
-            SDL_RendererFlip flipType = SDL_FLIP_NONE;
+			// Flip type
+			SDL_RendererFlip flipType = SDL_FLIP_NONE;
 
 			// While application is running
 			while (!quit) {
@@ -282,38 +335,14 @@ int main(int argc, char* args[]) {
 					if (e.type == SDL_QUIT) {
 						quit = true;
 					}
-                    else if (e.type == SDL_KEYDOWN){
-                        switch(e.key.keysym.sym){
-                            case SDLK_a:
-								degrees -= 60;
-								break;
-
-                            case SDLK_d:
-								degrees += 60;
-								break;
-
-                            case SDLK_q:
-								flipType = SDL_FLIP_HORIZONTAL;
-								break;
-
-							case SDLK_w:
-								flipType = SDL_FLIP_NONE;
-								break;
-
-							case SDLK_e:
-								flipType = SDL_FLIP_VERTICAL;
-								break;
-                        }
-                    }
-					
 				}
 
 				// Clear screen
 				SDL_SetRenderDrawColor(gRenderer, 0xFF, 0xFF, 0xFF, 0xFF);
 				SDL_RenderClear(gRenderer);
 
-                // Render arrow
-				gArrowTexture.render((SCREEN_WIDTH - gArrowTexture.getWidth())/2, (SCREEN_HEIGHT - gArrowTexture.getHeight()) / 2,NULL, degrees,NULL, flipType);
+				// Render arrow
+				gTextTexture.render((SCREEN_WIDTH - gTextTexture.getWidth()) / 2, (SCREEN_HEIGHT - gTextTexture.getHeight()) / 2);
 
 				// Update screen
 				SDL_RenderPresent(gRenderer);

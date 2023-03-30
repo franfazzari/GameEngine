@@ -15,10 +15,7 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="Lesson13.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="Lesson14.cpp">
+    <ClCompile Include="Lesson16.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
