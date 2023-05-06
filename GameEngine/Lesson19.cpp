@@ -1,6 +1,5 @@
 #include <SDL.h>
 #include <SDL_image.h>
-#include <SDL_ttf.h>
 #include <stdio.h>
 #include <string>
 #include <cmath>
@@ -8,6 +7,9 @@
 // Screen dimension constants
 const int SCREEN_WIDTH = 640;
 const int SCREEN_HEIGHT = 480;
+
+// Analog joystick dead zone
+const int JOYSTICK_DEAD_ZONE = 8000;
 
 // Starts up SDL and creates window
 bool init();
@@ -30,9 +32,10 @@ public:
 	// Loads image at specified path
 	bool loadFromFile(std::string path);
 
+#if defined(SDL_TTF_MAJOR_VERSION)
 	// Creates image from font string
 	bool loadFromRenderedText(std::string textureText, SDL_Color textColor);
-
+#endif 
 	// Deallocates texture
 	void free();
 
@@ -67,11 +70,16 @@ SDL_Window* gWindow = NULL;
 // The surface contained by the window
 SDL_Renderer* gRenderer = NULL;
 
+// Scene texture
+LTexture gArrowTexture;
+
+#if defined(SDL_TTF_MAJOR_VERSION)
 // Globally used font
 TTF_Font* gFont = NULL;
+#endif
 
-// Rendered Texture
-LTexture gTextTexture;
+// Game Controller 1 handler
+SDL_Joystick* gGameController = NULL;
 
 LTexture::LTexture() {
 	// Initialize
@@ -125,6 +133,7 @@ bool LTexture::loadFromFile(std::string path) {
 	return mTexture != NULL;
 }
 
+#if defined(SDL_TTF_MAJOR_VERSION)
 bool LTexture::loadFromRenderedText(std::string textureText, SDL_Color textColor) {
 	// Get rid of preexisting texture
 	free();
@@ -151,6 +160,7 @@ bool LTexture::loadFromRenderedText(std::string textureText, SDL_Color textColor
 	// Return success
 	return mTexture != NULL;
 }
+#endif
 
 void LTexture::free() {
 	// Free texture if exists
@@ -203,11 +213,29 @@ bool init() {
 	bool success = true;
 
 	// Initialize SDL
-	if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+	if (SDL_Init(SDL_INIT_VIDEO || SDL_INIT_JOYSTICK) < 0) {
 		printf("SDL could not initialize! SDL Error: %s\n", SDL_GetError());
 		success = false;
 	}
 	else {
+
+		// Set texture filtering to linear
+		if (!SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1")) {
+			printf("Warning: Linear texture filtering not enabled!");
+		}
+
+		// Check for joysticks
+		if (SDL_NumJoysticks() < 1) {
+			printf("Warning: No joysticks connected!\n");
+		}
+		else {
+			// Load joystick
+			gGameController = SDL_JoystickOpen(0);
+			if (gGameController == NULL) {
+				printf("Warning: Unable to open game controller! SDL Error: %s\n", SDL_GetError());
+			}
+		}
+
 		//Create window
 		gWindow = SDL_CreateWindow("SDL Tutorial", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_SHOWN);
 		if (gWindow == NULL)
@@ -232,12 +260,14 @@ bool init() {
 					printf("SDL_Image could not initialize! SDL_Image Error: %s\n", IMG_GetError());
 					success = false;
 				}
-				
+
+#if defined(SDL_TTF_MAJOR_VERSION)
 				// Initialize SDL_ttf
 				if (TTF_Init() == -1) {
 					printf("SDL_ttf could not initialize! SDL_ttf Error: %s\n", TTF_GetError());
 					success = false;
 				}
+#endif
 			}
 		}
 	}
@@ -246,34 +276,34 @@ bool init() {
 
 bool loadMedia() {
 
-	// Loading succes flag
+	//Loading success flag
 	bool success = true;
 
-	// Open the font
-	gFont = TTF_OpenFont("16_true_type_fonts/lazy.ttf", 28);
-	if (gFont == NULL) {
-		printf("Failed to load lazy font! SDL_ttf Error: %s\n", TTF_GetError());
+	//Load arrow texture
+	if (!gArrowTexture.loadFromFile("19_gamepads_and_joysticks/arrow.png"))
+	{
+		printf("Failed to load press texture!\n");
 		success = false;
 	}
-	else {
-		// Render text
-		SDL_Color textColor = { 0, 0, 0 };
-		if (!gTextTexture.loadFromRenderedText( "The quick brown fox jumps over the lazy dog", textColor)) {
-			printf("Failed to render text texture!\n");
-			success = false;
-		}
-	}
+
+	return success;
 
 	return success;
 }
 
 void close() {
 	// Free loaded images
-	gTextTexture.free();
+	gArrowTexture.free();
 
+#if defined(SDL_TTF_MAJOR_VERSION)
 	// Free global font
 	TTF_CloseFont(gFont);
 	gFont = NULL;
+#endif
+
+	// Close game controller
+	SDL_JoystickClose(gGameController);
+	gGameController = NULL;
 
 	// Destroy window
 	SDL_DestroyRenderer(gRenderer);
@@ -284,7 +314,9 @@ void close() {
 	// Quit SDL subsystems
 	SDL_Quit();
 	IMG_Quit();
+#if defined(SDL_TTF_MAJOR_VERSION)
 	TTF_Quit();
+#endif
 }
 
 SDL_Texture* loadTexture(std::string path) {
@@ -319,8 +351,12 @@ int main(int argc, char* args[]) {
 			// Event handler
 			SDL_Event e;
 
-			// Angle of rotation
-			double degrees = 0;
+			// Normalized direction
+			int xDir = 0;
+			int yDir = 0;
+
+			// Current rendered texture
+			LTexture* currentTexture = NULL;
 
 			// Flip type
 			SDL_RendererFlip flipType = SDL_FLIP_NONE;
@@ -335,18 +371,62 @@ int main(int argc, char* args[]) {
 					if (e.type == SDL_QUIT) {
 						quit = true;
 					}
+					else if (e.type == SDL_JOYAXISMOTION) {
+
+						// Motion on controller 0
+						if (e.jaxis.which == 0) {
+
+							// X axis motion
+							if (e.jaxis.axis == 0) {
+
+								//Left of dead zone
+								if (e.jaxis.value < -JOYSTICK_DEAD_ZONE) {
+									xDir = -1;
+								}
+								// Right of dead zone
+								else if (e.jaxis.value > JOYSTICK_DEAD_ZONE) {
+									xDir = 1;
+								}
+								else {
+									xDir = 0;
+								}
+							}
+							else if (e.jaxis.axis == 1) {
+
+								// Below  dead zone
+								if (e.jaxis.value < -JOYSTICK_DEAD_ZONE) {
+									yDir = -1;
+								}
+								// Above dead zone
+								else if (e.jaxis.value > JOYSTICK_DEAD_ZONE) {
+									yDir = 1;
+								}
+								else {
+									yDir = 0;
+								}
+							}
+						}
+
+						// Clear screen
+						SDL_SetRenderDrawColor(gRenderer, 0xFF, 0xFF, 0xFF, 0xFF);
+						SDL_RenderClear(gRenderer);
+
+						// Calculate angle
+						double joystickAngle = atan2((double)yDir, (double)xDir) * (180.0 / M_PI);
+
+						//Correct angle
+						if (xDir == 0 && yDir == 0) {
+							joystickAngle = 0;
+						}
+						// Render joystick 8 way angle
+						gArrowTexture.render((SCREEN_WIDTH - gArrowTexture.getWidth()) / 2, SCREEN_HEIGHT - gArrowTexture.getHeight() / 2, NULL, joystickAngle);
+
+
+						// Update screen
+						SDL_RenderPresent(gRenderer);
+
+					}
 				}
-
-				// Clear screen
-				SDL_SetRenderDrawColor(gRenderer, 0xFF, 0xFF, 0xFF, 0xFF);
-				SDL_RenderClear(gRenderer);
-
-				// Render arrow
-				gTextTexture.render((SCREEN_WIDTH - gTextTexture.getWidth()) / 2, (SCREEN_HEIGHT - gTextTexture.getHeight()) / 2);
-
-				// Update screen
-				SDL_RenderPresent(gRenderer);
-
 			}
 		}
 	}

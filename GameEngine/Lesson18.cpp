@@ -1,6 +1,5 @@
 #include <SDL.h>
 #include <SDL_image.h>
-#include <SDL_ttf.h>
 #include <stdio.h>
 #include <string>
 #include <cmath>
@@ -30,9 +29,10 @@ public:
 	// Loads image at specified path
 	bool loadFromFile(std::string path);
 
+#if defined(SDL_TTF_MAJOR_VERSION)
 	// Creates image from font string
 	bool loadFromRenderedText(std::string textureText, SDL_Color textColor);
-
+#endif 
 	// Deallocates texture
 	void free();
 
@@ -67,11 +67,18 @@ SDL_Window* gWindow = NULL;
 // The surface contained by the window
 SDL_Renderer* gRenderer = NULL;
 
+#if defined(SDL_TTF_MAJOR_VERSION)
 // Globally used font
 TTF_Font* gFont = NULL;
+#endif
 
-// Rendered Texture
-LTexture gTextTexture;
+// Scene textures
+LTexture gPressTexture;
+LTexture gUpTexture;
+LTexture gDownTexture;
+LTexture gLeftTexture;
+LTexture gRightTexture;
+
 
 LTexture::LTexture() {
 	// Initialize
@@ -125,6 +132,7 @@ bool LTexture::loadFromFile(std::string path) {
 	return mTexture != NULL;
 }
 
+#if defined(SDL_TTF_MAJOR_VERSION)
 bool LTexture::loadFromRenderedText(std::string textureText, SDL_Color textColor) {
 	// Get rid of preexisting texture
 	free();
@@ -151,6 +159,7 @@ bool LTexture::loadFromRenderedText(std::string textureText, SDL_Color textColor
 	// Return success
 	return mTexture != NULL;
 }
+#endif
 
 void LTexture::free() {
 	// Free texture if exists
@@ -232,12 +241,14 @@ bool init() {
 					printf("SDL_Image could not initialize! SDL_Image Error: %s\n", IMG_GetError());
 					success = false;
 				}
-				
+
+#if defined(SDL_TTF_MAJOR_VERSION)
 				// Initialize SDL_ttf
 				if (TTF_Init() == -1) {
 					printf("SDL_ttf could not initialize! SDL_ttf Error: %s\n", TTF_GetError());
 					success = false;
 				}
+#endif
 			}
 		}
 	}
@@ -246,34 +257,62 @@ bool init() {
 
 bool loadMedia() {
 
-	// Loading succes flag
+	//Loading success flag
 	bool success = true;
 
-	// Open the font
-	gFont = TTF_OpenFont("16_true_type_fonts/lazy.ttf", 28);
-	if (gFont == NULL) {
-		printf("Failed to load lazy font! SDL_ttf Error: %s\n", TTF_GetError());
+	//Load press texture
+	if (!gPressTexture.loadFromFile("18_key_states/press.png"))
+	{
+		printf("Failed to load press texture!\n");
 		success = false;
 	}
-	else {
-		// Render text
-		SDL_Color textColor = { 0, 0, 0 };
-		if (!gTextTexture.loadFromRenderedText( "The quick brown fox jumps over the lazy dog", textColor)) {
-			printf("Failed to render text texture!\n");
-			success = false;
-		}
+
+	//Load up texture
+	if (!gUpTexture.loadFromFile("18_key_states/up.png"))
+	{
+		printf("Failed to load up texture!\n");
+		success = false;
 	}
+
+	//Load down texture
+	if (!gDownTexture.loadFromFile("18_key_states/down.png"))
+	{
+		printf("Failed to load down texture!\n");
+		success = false;
+	}
+
+	//Load left texture
+	if (!gLeftTexture.loadFromFile("18_key_states/left.png"))
+	{
+		printf("Failed to load left texture!\n");
+		success = false;
+	}
+
+	//Load right texture
+	if (!gRightTexture.loadFromFile("18_key_states/right.png"))
+	{
+		printf("Failed to load right texture!\n");
+		success = false;
+	}
+
+	return success;
 
 	return success;
 }
 
 void close() {
 	// Free loaded images
-	gTextTexture.free();
+	gDownTexture.free();
+	gUpTexture.free();
+	gLeftTexture.free();
+	gRightTexture.free();
+	gPressTexture.free();
 
+#if defined(SDL_TTF_MAJOR_VERSION)
 	// Free global font
 	TTF_CloseFont(gFont);
 	gFont = NULL;
+#endif
 
 	// Destroy window
 	SDL_DestroyRenderer(gRenderer);
@@ -284,7 +323,9 @@ void close() {
 	// Quit SDL subsystems
 	SDL_Quit();
 	IMG_Quit();
+#if defined(SDL_TTF_MAJOR_VERSION)
 	TTF_Quit();
+#endif
 }
 
 SDL_Texture* loadTexture(std::string path) {
@@ -319,8 +360,8 @@ int main(int argc, char* args[]) {
 			// Event handler
 			SDL_Event e;
 
-			// Angle of rotation
-			double degrees = 0;
+			// Current rendered texture
+			LTexture* currentTexture = NULL;
 
 			// Flip type
 			SDL_RendererFlip flipType = SDL_FLIP_NONE;
@@ -336,13 +377,30 @@ int main(int argc, char* args[]) {
 						quit = true;
 					}
 				}
+				// Set texture based on current keystate
+				const Uint8* currentKeyStates = SDL_GetKeyboardState(NULL);
+				if (currentKeyStates[SDL_SCANCODE_UP]) {
+					currentTexture = &gUpTexture;
+				}
+				else if (currentKeyStates[SDL_SCANCODE_DOWN]) {
+					currentTexture = &gDownTexture;
+				}
+				else if (currentKeyStates[SDL_SCANCODE_LEFT]) {
+					currentTexture = &gLeftTexture;
+				}
+				else if (currentKeyStates[SDL_SCANCODE_RIGHT]) {
+					currentTexture = &gRightTexture;
+				}
+				else {
+					currentTexture = &gPressTexture;
+				}
 
 				// Clear screen
 				SDL_SetRenderDrawColor(gRenderer, 0xFF, 0xFF, 0xFF, 0xFF);
 				SDL_RenderClear(gRenderer);
 
-				// Render arrow
-				gTextTexture.render((SCREEN_WIDTH - gTextTexture.getWidth()) / 2, (SCREEN_HEIGHT - gTextTexture.getHeight()) / 2);
+				// Render current texture
+				currentTexture->render(0, 0);
 
 				// Update screen
 				SDL_RenderPresent(gRenderer);

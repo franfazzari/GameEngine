@@ -1,6 +1,6 @@
 #include <SDL.h>
 #include <SDL_image.h>
-#include <SDL_ttf.h>
+#include <SDL_mixer.h>
 #include <stdio.h>
 #include <string>
 #include <cmath>
@@ -8,6 +8,9 @@
 // Screen dimension constants
 const int SCREEN_WIDTH = 640;
 const int SCREEN_HEIGHT = 480;
+
+// Analog joystick dead zone
+const int JOYSTICK_DEAD_ZONE = 8000;
 
 // Starts up SDL and creates window
 bool init();
@@ -30,9 +33,10 @@ public:
 	// Loads image at specified path
 	bool loadFromFile(std::string path);
 
+#if defined(SDL_TTF_MAJOR_VERSION)
 	// Creates image from font string
 	bool loadFromRenderedText(std::string textureText, SDL_Color textColor);
-
+#endif 
 	// Deallocates texture
 	void free();
 
@@ -67,11 +71,29 @@ SDL_Window* gWindow = NULL;
 // The surface contained by the window
 SDL_Renderer* gRenderer = NULL;
 
+// The music that will be played
+Mix_Music* gMusic = NULL;
+
+// The sound effects that will be used
+Mix_Chunk* gScratch = NULL;
+Mix_Chunk* gHigh = NULL;
+Mix_Chunk* gMedium = NULL;
+Mix_Chunk* gLow = NULL;
+
+// Scene texture
+LTexture gPromptTexture;
+
+#if defined(SDL_TTF_MAJOR_VERSION)
 // Globally used font
 TTF_Font* gFont = NULL;
+#endif
 
-// Rendered Texture
-LTexture gTextTexture;
+// Game Controller 1 handler
+SDL_GameController* gGameController = NULL;
+
+// Joystick handler with haptic
+SDL_Joystick* gJoystick = NULL;
+SDL_Haptic* gJoyHaptic = NULL;
 
 LTexture::LTexture() {
 	// Initialize
@@ -125,6 +147,7 @@ bool LTexture::loadFromFile(std::string path) {
 	return mTexture != NULL;
 }
 
+#if defined(SDL_TTF_MAJOR_VERSION)
 bool LTexture::loadFromRenderedText(std::string textureText, SDL_Color textColor) {
 	// Get rid of preexisting texture
 	free();
@@ -151,6 +174,7 @@ bool LTexture::loadFromRenderedText(std::string textureText, SDL_Color textColor
 	// Return success
 	return mTexture != NULL;
 }
+#endif
 
 void LTexture::free() {
 	// Free texture if exists
@@ -198,16 +222,22 @@ int LTexture::getWidth() {
 int LTexture::getHeight() {
 	return mHeight;
 }
+
 bool init() {
 	// Initialization flag
 	bool success = true;
 
 	// Initialize SDL
-	if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) {
 		printf("SDL could not initialize! SDL Error: %s\n", SDL_GetError());
 		success = false;
 	}
 	else {
+
+		// Set texture filtering to linear
+		if (!SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1")) {
+			printf("Warning: Linear texture filtering not enabled!");
+		}
 		//Create window
 		gWindow = SDL_CreateWindow("SDL Tutorial", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_SHOWN);
 		if (gWindow == NULL)
@@ -226,18 +256,24 @@ bool init() {
 				// Initialize renderer color
 				SDL_SetRenderDrawColor(gRenderer, 0xFF, 0xFF, 0xFF, 0xFF);
 
-				// Initilize PNG loading
+				// Initialize PNG loading
 				int imgFlags = IMG_INIT_PNG;
 				if (!(IMG_Init(imgFlags) & imgFlags)) {
 					printf("SDL_Image could not initialize! SDL_Image Error: %s\n", IMG_GetError());
 					success = false;
 				}
-				
+				// Initialize SDL_Mixer
+				if (Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 2048) > 0) {
+					printf("SDL_mixer could not initialize! SDL_mixer Error: %s\n", Mix_GetError());
+				}
+
+#if defined(SDL_TTF_MAJOR_VERSION)
 				// Initialize SDL_ttf
 				if (TTF_Init() == -1) {
 					printf("SDL_ttf could not initialize! SDL_ttf Error: %s\n", TTF_GetError());
 					success = false;
 				}
+#endif
 			}
 		}
 	}
@@ -246,22 +282,43 @@ bool init() {
 
 bool loadMedia() {
 
-	// Loading succes flag
+	//Loading success flag
 	bool success = true;
 
-	// Open the font
-	gFont = TTF_OpenFont("16_true_type_fonts/lazy.ttf", 28);
-	if (gFont == NULL) {
-		printf("Failed to load lazy font! SDL_ttf Error: %s\n", TTF_GetError());
+	//Load prompt texture
+	if (!gPromptTexture.loadFromFile("21_sound_effects_and_music/prompt.png"))
+	{
+		printf("Failed to load press texture!\n");
 		success = false;
 	}
-	else {
-		// Render text
-		SDL_Color textColor = { 0, 0, 0 };
-		if (!gTextTexture.loadFromRenderedText( "The quick brown fox jumps over the lazy dog", textColor)) {
-			printf("Failed to render text texture!\n");
-			success = false;
-		}
+
+	// Load music
+	gMusic = Mix_LoadMUS("21_sound_effects_and_music/beat.wav");
+	if (gMusic == NULL) {
+		printf("Failed to load beat music! SDL_mixer Error: %s\n", Mix_GetError());
+		success = false;
+	}
+
+	// Load sound effects
+	gScratch = Mix_LoadWAV("21_sound_effects_and_music/scratch.wav");
+	if (gScratch == NULL) {
+		printf("Failed to load scratch sound effect! SDL_mixer Error: %s\n", Mix_GetError());
+		success = false;
+	}
+	gHigh = Mix_LoadWAV("21_sound_effects_and_music/high.wav");
+	if (gHigh == NULL) {
+		printf("Failed to load high sound effect! SDL_mixer Error: %s\n", Mix_GetError());
+		success = false;
+	}
+	gMedium = Mix_LoadWAV("21_sound_effects_and_music/medium.wav");
+	if (gMedium == NULL) {
+		printf("Failed to load medium sound effect! SDL_mixer Error: %s\n", Mix_GetError());
+		success = false;
+	}
+	gLow = Mix_LoadWAV("21_sound_effects_and_music/low.wav");
+	if (gLow == NULL) {
+		printf("Failed to load low sound effect! SDL_mixer Error: %s\n", Mix_GetError());
+		success = false;
 	}
 
 	return success;
@@ -269,11 +326,27 @@ bool loadMedia() {
 
 void close() {
 	// Free loaded images
-	gTextTexture.free();
+	gPromptTexture.free();
 
+#if defined(SDL_TTF_MAJOR_VERSION)
 	// Free global font
 	TTF_CloseFont(gFont);
 	gFont = NULL;
+#endif
+
+	// Free the sound effects
+	Mix_FreeChunk(gScratch);
+	Mix_FreeChunk(gHigh);
+	Mix_FreeChunk(gMedium);
+	Mix_FreeChunk(gLow);
+	gScratch = NULL;
+	gHigh = NULL;
+	gMedium = NULL;
+	gLow = NULL;
+
+	// Free the music 
+	Mix_FreeMusic(gMusic);
+	gMusic = NULL;
 
 	// Destroy window
 	SDL_DestroyRenderer(gRenderer);
@@ -284,7 +357,10 @@ void close() {
 	// Quit SDL subsystems
 	SDL_Quit();
 	IMG_Quit();
+	Mix_Quit();
+#if defined(SDL_TTF_MAJOR_VERSION)
 	TTF_Quit();
+#endif
 }
 
 SDL_Texture* loadTexture(std::string path) {
@@ -319,8 +395,8 @@ int main(int argc, char* args[]) {
 			// Event handler
 			SDL_Event e;
 
-			// Angle of rotation
-			double degrees = 0;
+			// Current rendered texture
+			LTexture* currentTexture = NULL;
 
 			// Flip type
 			SDL_RendererFlip flipType = SDL_FLIP_NONE;
@@ -335,18 +411,65 @@ int main(int argc, char* args[]) {
 					if (e.type == SDL_QUIT) {
 						quit = true;
 					}
+					else if (e.type == SDL_KEYDOWN) {
+
+						switch (e.key.keysym.sym) {
+						// Play high sound effect
+						case SDLK_1:
+							Mix_PlayChannel(-1, gHigh, 0);
+							break;
+						// Play Medium sound effect
+						case SDLK_2:
+							Mix_PlayChannel(-1, gMedium, 0);
+							break;
+						// Play Low sound effect
+						case SDLK_3:
+							Mix_PlayChannel(-1, gLow, 0);
+							break;
+						// Play Scratch sound effect
+						case SDLK_4:
+							Mix_PlayChannel(-1, gScratch, 0);
+							break;
+						case SDLK_9:
+						// If there is no music playing
+							if (Mix_PlayingMusic() == 0) {
+								// Play the music 
+								Mix_PlayMusic(gMusic, -1);
+						}
+						// If music is playing
+							else {
+								// If the music is paused
+								if (Mix_PausedMusic() == 1) {
+									// Resume the music
+									Mix_ResumeMusic();
+								}
+								// If the music is playing
+								else {
+									// Pause the music
+									Mix_PauseMusic();
+								}
+							}
+							break;
+						case SDLK_0:
+							// Stop the music
+							Mix_HaltMusic();
+							break;
+						}
+						
+
+						// Clear screen
+						SDL_SetRenderDrawColor(gRenderer, 0xFF, 0xFF, 0xFF, 0xFF);
+						SDL_RenderClear(gRenderer);
+
+						// Render joystick 8 way angle
+						gPromptTexture.render(0, 0);
+
+
+						// Update screen
+						SDL_RenderPresent(gRenderer);
+
+					}
 				}
-
-				// Clear screen
-				SDL_SetRenderDrawColor(gRenderer, 0xFF, 0xFF, 0xFF, 0xFF);
-				SDL_RenderClear(gRenderer);
-
-				// Render arrow
-				gTextTexture.render((SCREEN_WIDTH - gTextTexture.getWidth()) / 2, (SCREEN_HEIGHT - gTextTexture.getHeight()) / 2);
-
-				// Update screen
-				SDL_RenderPresent(gRenderer);
-
 			}
 		}
 	}
