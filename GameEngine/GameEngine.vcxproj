@@ -19,7 +19,9 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="Lesson35.cpp" />
+    <ClCompile Include="Lesson48.cpp" />
+    <ClCompile Include="Lesson49.cpp" />
+    <ClCompile Include="Lesson50.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>16.0</VCProjectVersion>
